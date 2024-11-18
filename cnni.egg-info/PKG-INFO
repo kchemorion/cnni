@@ -1,0 +1,86 @@
+Metadata-Version: 2.1
+Name: cnni
+Version: 0.1.0
+Summary: Contextual Nearest Neighbor Imputation (CNNI) - A context-aware method for missing data imputation
+Home-page: https://github.com/yourusername/cnni
+Author: Your Name
+Author-email: your.email@example.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.21.0
+Requires-Dist: pandas>=1.3.0
+Requires-Dist: scikit-learn>=0.24.2
+Requires-Dist: matplotlib>=3.4.2
+Requires-Dist: seaborn>=0.11.1
+
+# Contextual Nearest Neighbor Imputation (CNNI)
+
+A novel method for missing data imputation that combines elements of k-Nearest Neighbors (kNN) imputation with contextual information to provide more accurate and robust imputations.
+
+## Features
+
+- Context-aware imputation using temporal, spatial, and categorical information
+- Adaptive k-neighbor selection based on local data density
+- Comprehensive evaluation metrics (RMSE, MAE)
+- Visualization tools for imputation results
+- Support for multiple data types and missing data patterns
+
+## Installation
+
+1. Clone this repository
+2. Install the required packages:
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+Basic usage example:
+
+```python
+from cnni import CNNImputer
+
+# Initialize the imputer
+imputer = CNNImputer(
+    max_k=10,
+    temporal_weight=0.3,
+    spatial_weight=0.3,
+    categorical_weight=0.4
+)
+
+# Perform imputation
+X_imputed = imputer.fit_transform(
+    X,
+    temporal_info=temporal_data,
+    spatial_info=spatial_data,
+    categorical_info=categorical_data
+)
+
+# Evaluate performance
+rmse, mae = imputer.evaluate(X_true, X_imputed, mask)
+
+# Visualize results
+imputer.plot_results(X_true, X_imputed, mask)
+```
+
+## Testing
+
+Run the test script to evaluate the imputer on synthetic data:
+
+```bash
+python test_cnni.py
+```
+
+## Parameters
+
+- `max_k`: Maximum number of neighbors to consider (default: 10)
+- `temporal_weight`: Weight for temporal context (default: 0.3)
+- `spatial_weight`: Weight for spatial context (default: 0.3)
+- `categorical_weight`: Weight for categorical context (default: 0.4)
+- `distance_metric`: Distance metric for nearest neighbors (default: 'euclidean')
+
+## Contributing
+
+Feel free to submit issues, fork the repository, and create pull requests for any improvements.
