@@ -33,65 +33,68 @@ class CNNImputer:
         self.spatial_weight = spatial_weight
         self.categorical_weight = categorical_weight
         self.distance_metric = distance_metric
-        self.scaler = StandardScaler()
         
-    def _preprocess_data(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Preprocess the input data."""
-        # Create a copy to avoid modifying the original data
-        X_processed = X.copy()
-        
-        # Identify numeric columns
-        numeric_cols = X_processed.select_dtypes(include=[np.number]).columns
-        
-        # Scale numeric features
-        if len(numeric_cols) > 0:
-            X_processed[numeric_cols] = self.scaler.fit_transform(X_processed[numeric_cols])
+    def _preprocess_data(self, data):
+        """Preprocess input data."""
+        if isinstance(data, pd.DataFrame):
+            # Store column names for later
+            self.column_names = data.columns
             
-        return X_processed
-        
-    def _calculate_context_weights(
-        self, 
-        X: pd.DataFrame,
-        temporal_info: Optional[pd.Series] = None,
-        spatial_info: Optional[pd.DataFrame] = None,
-        categorical_info: Optional[pd.DataFrame] = None
-    ) -> np.ndarray:
-        """Calculate context-aware weights for each data point."""
-        n_samples = len(X)
+            # Initialize scaler if not already done
+            if not hasattr(self, 'scaler'):
+                self.scaler = StandardScaler()
+                self.scaler.fit(data)
+            
+            # Transform the data
+            data = self.scaler.transform(data)
+        return data.astype(float)
+    
+    def _inverse_transform(self, data):
+        """Inverse transform scaled data."""
+        if hasattr(self, 'scaler'):
+            data = self.scaler.inverse_transform(data)
+        return data
+    
+    def _calculate_context_weights(self, data, temporal_info=None, spatial_info=None, categorical_info=None):
+        """Calculate weights based on context."""
+        n_samples = len(data)
         weights = np.ones((n_samples, n_samples))
         
-        # Apply temporal weighting if temporal information is provided
         if temporal_info is not None:
-            temporal_dist = np.abs(temporal_info.values.reshape(-1, 1) - temporal_info.values.reshape(1, -1))
-            temporal_weights = np.exp(-self.temporal_weight * temporal_dist)
-            weights *= temporal_weights
-            
-        # Apply spatial weighting if spatial information is provided
+            temporal_info = temporal_info.to_numpy().reshape(-1, 1)
+            temporal_dist = np.abs(temporal_info - temporal_info.T)
+            temporal_weights = 1 / (1 + temporal_dist)
+            weights *= self.temporal_weight * temporal_weights
+        
         if spatial_info is not None:
-            spatial_dist = np.sqrt(
-                np.sum(
-                    (spatial_info.values.reshape(n_samples, 1, -1) - 
-                     spatial_info.values.reshape(1, n_samples, -1)) ** 2,
-                    axis=2
-                )
-            )
-            spatial_weights = np.exp(-self.spatial_weight * spatial_dist)
-            weights *= spatial_weights
-            
-        # Apply categorical weighting if categorical information is provided
+            spatial_info = spatial_info.astype(float)
+            spatial_dist = np.zeros((n_samples, n_samples))
+            for i in range(n_samples):
+                spatial_dist[i] = np.sqrt(np.sum((spatial_info - spatial_info[i]) ** 2, axis=1))
+            spatial_weights = 1 / (1 + spatial_dist)
+            weights *= self.spatial_weight * spatial_weights
+        
         if categorical_info is not None:
-            categorical_dist = (categorical_info.values.reshape(n_samples, 1, -1) != 
-                              categorical_info.values.reshape(1, n_samples, -1)).mean(axis=2)
-            categorical_weights = np.exp(-self.categorical_weight * categorical_dist)
-            weights *= categorical_weights
-            
+            categorical_info = categorical_info.astype(float)
+            categorical_dist = np.zeros((n_samples, n_samples))
+            for i in range(n_samples):
+                categorical_dist[i] = np.sum(categorical_info != categorical_info[i], axis=1)
+            categorical_weights = 1 / (1 + categorical_dist)
+            weights *= self.categorical_weight * categorical_weights
+        
         return weights
     
-    def _get_adaptive_k(self, X: pd.DataFrame, point_idx: int) -> int:
-        """Determine adaptive k based on local data density."""
-        # Simple density-based adaptation
-        density = np.sum(~X.isna().iloc[point_idx])
-        k = max(2, min(self.max_k, int(np.sqrt(density))))
+    def _get_adaptive_k(self, data, missing_mask):
+        """Determine adaptive k based on data density."""
+        n_samples = len(data)
+        n_features = data.shape[1]
+        missing_ratio = missing_mask.sum() / (n_samples * n_features)
+        
+        # Adjust k based on missing ratio and data size
+        k = min(
+            self.max_k,
+            max(3, int(n_samples * (1 - missing_ratio) * 0.1))
+        )
         return k
     
     def fit_transform(
@@ -114,68 +117,106 @@ class CNNImputer:
             Imputed DataFrame
         """
         # Preprocess data
-        X_processed = self._preprocess_data(X)
+        data = self._preprocess_data(X)
+        missing_mask = np.isnan(data)
         
-        # Calculate context weights
-        context_weights = self._calculate_context_weights(
-            X_processed, temporal_info, spatial_info, categorical_info
-        )
+        if not np.any(missing_mask):
+            return X
         
-        # Create output DataFrame
-        X_imputed = X_processed.copy()
+        # Convert temporal_info to numpy array if needed
+        if temporal_info is not None:
+            temporal_info = np.array(temporal_info)
         
-        # Iterate through columns with missing values
-        for col in X_processed.columns[X_processed.isna().any()]:
-            # Get indices of missing and non-missing values
-            missing_mask = X_processed[col].isna()
-            valid_mask = ~missing_mask
-            
-            if sum(valid_mask) == 0:
+        # Initialize output array
+        imputed_data = data.copy()
+        
+        # Process each feature separately to save memory
+        for feature_idx in range(data.shape[1]):
+            feature_missing = missing_mask[:, feature_idx]
+            if not np.any(feature_missing):
                 continue
             
-            # Get non-missing data for the current column
-            valid_data = X_processed[valid_mask].fillna(X_processed[valid_mask].mean())
-            missing_data = X_processed[missing_mask].fillna(X_processed[valid_mask].mean())
+            feature_data = data[:, feature_idx]
+            feature_known = ~feature_missing
             
-            # Initialize and fit nearest neighbors on non-missing data
-            nbrs = NearestNeighbors(metric=self.distance_metric)
-            nbrs.fit(valid_data)
+            if not np.any(feature_known):
+                print(f"Warning: All values missing in feature {feature_idx}")
+                continue
             
-            # Find k nearest neighbors for each missing value
-            missing_indices = np.where(missing_mask)[0]
-            for idx in missing_indices:
-                # Get adaptive k for this point
-                k = self._get_adaptive_k(X_processed, idx)
+            # Process missing values in batches
+            batch_size = 1000  # Adjust based on available memory
+            missing_indices = np.where(feature_missing)[0]
+            known_indices = np.where(feature_known)[0]
+            
+            print(f"Processing feature {feature_idx}: {len(missing_indices)} missing values")
+            
+            for batch_start in range(0, len(missing_indices), batch_size):
+                batch_end = min(batch_start + batch_size, len(missing_indices))
+                batch_indices = missing_indices[batch_start:batch_end]
                 
-                # Get the data point with missing value
-                query_point = X_processed.iloc[[idx]].fillna(X_processed[valid_mask].mean())
+                # Calculate weights for this batch
+                batch_weights = np.zeros((len(batch_indices), len(known_indices)))
+                
+                # Calculate temporal weights if available
+                if temporal_info is not None:
+                    temporal_batch = temporal_info[batch_indices].reshape(-1, 1)
+                    temporal_known = temporal_info[known_indices].reshape(1, -1)
+                    temporal_dist = np.abs(temporal_batch - temporal_known)
+                    batch_weights += self.temporal_weight * (1 / (1 + temporal_dist))
+                
+                # Calculate spatial weights if available
+                if spatial_info is not None:
+                    spatial_batch = spatial_info[batch_indices]
+                    spatial_known = spatial_info[known_indices]
+                    for i in range(len(batch_indices)):
+                        spatial_dist = np.sqrt(np.sum((spatial_known - spatial_batch[i]) ** 2, axis=1))
+                        batch_weights[i] += self.spatial_weight * (1 / (1 + spatial_dist))
+                
+                # Calculate categorical weights if available
+                if categorical_info is not None:
+                    categorical_batch = categorical_info[batch_indices]
+                    categorical_known = categorical_info[known_indices]
+                    for i in range(len(batch_indices)):
+                        categorical_dist = np.sum(categorical_known != categorical_batch[i], axis=1)
+                        batch_weights[i] += self.categorical_weight * (1 / (1 + categorical_dist))
+                
+                # Normalize weights
+                row_sums = batch_weights.sum(axis=1)
+                if np.any(row_sums == 0):
+                    # If any row has all zero weights, use equal weights
+                    zero_rows = row_sums == 0
+                    batch_weights[zero_rows] = 1 / len(known_indices)
+                else:
+                    batch_weights /= row_sums[:, np.newaxis]
                 
                 # Find k nearest neighbors
-                distances, indices = nbrs.kneighbors(
-                    query_point,
-                    n_neighbors=min(k, sum(valid_mask))
-                )
+                k = min(self.max_k, len(known_indices))
+                neighbor_indices = np.argsort(-batch_weights, axis=1)[:, :k]
                 
-                # Get the actual indices of valid data points
-                valid_indices = np.where(valid_mask)[0]
-                neighbor_indices = valid_indices[indices[0]]
+                # Get known values
+                known_values = feature_data[known_indices]
                 
-                # Apply context weights
-                weights = context_weights[idx, neighbor_indices]
-                weights = weights / weights.sum()
+                # Calculate weighted average
+                for i, missing_idx in enumerate(batch_indices):
+                    neighbors = known_values[neighbor_indices[i]]
+                    neighbor_weights = batch_weights[i, neighbor_indices[i]]
+                    if np.sum(neighbor_weights) == 0:
+                        # If all weights are zero, use mean of neighbors
+                        imputed_data[missing_idx, feature_idx] = np.mean(neighbors)
+                    else:
+                        # Renormalize weights
+                        neighbor_weights = neighbor_weights / np.sum(neighbor_weights)
+                        imputed_data[missing_idx, feature_idx] = np.average(
+                            neighbors, weights=neighbor_weights
+                        )
                 
-                # Compute weighted average for imputation
-                X_imputed.iloc[idx, X_imputed.columns.get_loc(col)] = np.average(
-                    X_processed.iloc[neighbor_indices, X_processed.columns.get_loc(col)],
-                    weights=weights
-                )
+                if batch_end % 1000 == 0:
+                    print(f"  Processed {batch_end}/{len(missing_indices)} values")
         
-        # Inverse transform scaled features
-        numeric_cols = X.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) > 0:
-            X_imputed[numeric_cols] = self.scaler.inverse_transform(X_imputed[numeric_cols])
+        # Convert back to DataFrame
+        imputed_data = pd.DataFrame(self._inverse_transform(imputed_data), columns=self.column_names)
         
-        return X_imputed
+        return imputed_data
     
     def evaluate(
         self,

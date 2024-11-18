@@ -108,6 +108,43 @@ timestamp,latitude,longitude,category,temperature,humidity,pressure
 - `categorical_weight`: Weight for categorical context (default: 0.4)
 - `distance_metric`: Distance metric for nearest neighbors (default: 'euclidean')
 
+## Visualization Examples
+
+CNNI provides comprehensive visualizations to help understand the imputation results and validate the quality of imputed values. Here are some examples using a real estate dataset:
+
+### Missing Value Patterns
+![Missing Value Patterns](plots/missing_patterns.png)
+
+This plot shows the distribution of missing values across different columns in the dataset. In our example:
+- BuildingArea had the highest number of missing values (47.50%)
+- YearBuilt was the second most affected (39.58%)
+- Car and CouncilArea had relatively fewer missing values
+
+### Distribution Comparisons
+![Building Area Distribution](plots/distribution_BuildingArea.png)
+![Year Built Distribution](plots/distribution_YearBuilt.png)
+
+These density plots compare the distribution of original values (blue) with imputed values (red). The close alignment between distributions indicates that CNNI successfully preserves the statistical properties of the data.
+
+### Spatial Distribution
+![Spatial Distribution - Building Area](plots/spatial_distribution_BuildingArea.png)
+![Spatial Distribution - Year Built](plots/spatial_distribution_YearBuilt.png)
+
+These plots show the geographical distribution of original (blue) and imputed (red) values. The spatial coherence demonstrates CNNI's ability to consider location-based patterns during imputation.
+
+### Correlation Matrix
+![Correlation Matrix](plots/correlation_matrix.png)
+
+The correlation heatmap shows relationships between numeric variables after imputation. Strong correlations (dark blue/red) indicate preserved relationships between variables, while lighter colors show weaker relationships.
+
+### Key Insights from Visualizations:
+1. **Distribution Preservation**: Imputed values follow similar patterns to original data
+2. **Spatial Coherence**: Geographic patterns are maintained in the imputed values
+3. **Relationship Preservation**: Variable correlations are preserved after imputation
+4. **Missing Patterns**: Clear visualization of which columns required most imputation
+
+These visualizations help validate that CNNI maintains the statistical properties, spatial patterns, and variable relationships present in the original data.
+
 ## Contributing
 
 Feel free to submit issues, fork the repository, and create pull requests for any improvements.
