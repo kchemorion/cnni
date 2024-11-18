@@ -14,7 +14,7 @@ A novel method for missing data imputation that combines elements of k-Nearest N
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/cnni.git
+git clone https://github.com/kchemorion/cnni.git
 cd cnni
 ```
 
